@@ -208,12 +208,17 @@ def main():
 
     bode_asintotico(system)
 
-    # Nyquist
+    #Nyquist polar
     plt.figure()
     ctrl.nyquist(system)
-
+    ax=plt.gca()
+    def format_coord(x,y):
+        r= np.sqrt(x**2+y**2)
+        theta=np.arctan2(y,x)
+        theta=np.degrees(theta)
+        return f"x={x:.2f}, y={y:.2f} | r={r:.2f}, θ={theta:.2f} grad"
+    ax.format_coord=format_coord
     plt.show()
-
 
 if __name__ == "__main__":
     main()
