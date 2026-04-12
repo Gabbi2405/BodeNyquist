@@ -1,13 +1,12 @@
 import sympy as sp
+import numpy as np
 import control as ctrl
 import matplotlib.pyplot as plt
-import numpy as np
 
 s = sp.symbols('s')
 
-
 # -------------------------------
-# Parsing funzione classica
+# Parsing funzione
 # -------------------------------
 def parse_transfer_function(expr_str):
     expr = sp.sympify(expr_str)
@@ -22,146 +21,137 @@ def parse_transfer_function(expr_str):
     num_coeffs = [float(c) for c in num_coeffs]
     den_coeffs = [float(c) for c in den_coeffs]
 
-    return num_coeffs, den_coeffs, expr
+    return num_coeffs, den_coeffs
 
 
 # -------------------------------
-# Generazione forma di Bode
+# BODE ASINTOTICO COMPLETO
 # -------------------------------
-def bode_form(expr):
-    num, den = sp.fraction(expr)
-
-    num_factors = sp.factor(num)
-    den_factors = sp.factor(den)
-
-    print("\nForma fattorizzata:")
-    print("Numeratore:", num_factors)
-    print("Denominatore:", den_factors)
-
-    # Estrazione zeri e poli
-    zeros = sp.solve(num, s)
-    poles = sp.solve(den, s)
-
-    print("\nZeri:", zeros)
-    print("Poli:", poles)
-
-
-# -------------------------------
-# Input manuale forma di Bode
-# -------------------------------
-def input_bode_form():
-    print("\nInserisci guadagno K:")
-    K = float(input("> "))
-
-    expr = K
-
-    print("Quanti zeri? ")
-    z = int(input("> "))
-    for _ in range(z):
-        print("Zero del tipo (1 + s/w) → inserisci w:")
-        w = float(input("> "))
-        expr *= (1 + s/w)
-
-    print("Quanti poli? ")
-    p = int(input("> "))
-    for _ in range(p):
-        print("Polo del tipo (1 + s/w) → inserisci w:")
-        w = float(input("> "))
-        expr /= (1 + s/w)
-
-    print("Quanti integratori (1/s)? ")
-    n = int(input("> "))
-    expr /= s**n
-
-    return expr
-
-# -------------------------------
-# Bode aprossimativo
-# -------------------------------
-
 def bode_asintotico(system):
-    import numpy as np
-    import matplotlib.pyplot as plt
+    poles = ctrl.pole(system)
+    zeros = ctrl.zero(system)
 
-    poles = ctrl.poles(system)
-    zeros = ctrl.zeros(system)
-
-    # Separazione poli/zeri
-    wp = sorted([abs(p) for p in poles if p != 0])
-    wz = sorted([abs(z) for z in zeros if z != 0])
-
-    # Integratori
-    n_integrators = sum(1 for p in poles if p == 0)
-
-    # Frequenze log
     w = np.logspace(-2, 3, 1000)
 
-    # Guadagno iniziale
+    # Guadagno
     K = abs(system.dcgain()) if system.dcgain() not in [None, np.inf] else 1
-    mag = np.zeros_like(w)
 
-    # Lista eventi (frequenze di spezzata)
-    events = []
-    for z in wz:
-        events.append((z, +20))
-    for p in wp:
-        events.append((p, -20))
+    # ---------------- MODULO ----------------
+    mag = np.ones_like(w) * 20 * np.log10(K)
 
-    events.sort()
+    slope = 0
 
-    # Pendenza iniziale
-    slope = -20 * n_integrators
+    # Integratori
+    n_integrators = sum(1 for p in poles if np.isclose(p, 0))
+    slope -= 20 * n_integrators
 
-    current_mag = 20 * np.log10(K)
+    # Funzione per contributo modulo
+    def update_slope(freq, delta):
+        nonlocal slope
+        for i in range(len(w)):
+            if w[i] > freq:
+                mag[i] += delta * np.log10(w[i]/freq)
 
-    last_w = w[0]
+    # ZERI
+    for z in zeros:
+        if np.isclose(z, 0):
+            continue
 
-    mag_vals = []
+        if np.iscomplex(z):
+            wn = abs(z)
+            update_slope(wn, +40)  # secondo ordine
+        else:
+            update_slope(abs(z), +20)
 
-    for omega in w:
-        # aggiorna slope se superi breakpoint
-        for freq, delta in events:
-            if last_w < freq <= omega:
-                # aggiorna valore fino al breakpoint
-                current_mag += slope * np.log10(freq / last_w)
-                slope += delta
-                last_w = freq
+    # POLI
+    for p in poles:
+        if np.isclose(p, 0):
+            continue
 
-        # continua con slope corrente
-        mag_point = current_mag + slope * np.log10(omega / last_w)
-        mag_vals.append(mag_point)
+        if np.iscomplex(p):
+            wn = abs(p)
+            update_slope(wn, -40)
+        else:
+            update_slope(abs(p), -20)
 
-    # -------- FASE (approssimata stile umano) --------
+    # integratori (sempre attivi)
+    for i in range(len(w)):
+        mag[i] += slope * np.log10(w[i])
+
+    # ---------------- FASE ----------------
     phase = np.zeros_like(w)
-    
 
     for i, omega in enumerate(w):
-        phi = -90 * n_integrators
+        phi = 0
 
-        for z in wz:
-            if omega < z/10:
-                pass
-            elif omega > 10*z:
-                phi += 90
-            else:
-                phi += 45 * np.log10(omega / (z/10))
+        # integratori
+        phi -= 90 * n_integrators
 
-        for p in wp:
-            if omega < p/10:
-                pass
-            elif omega > 10*p:
-                phi -= 90
+        # ZERI
+        for z in zeros:
+            if np.isclose(z, 0):
+                continue
+
+            wn = abs(z)
+
+            if np.iscomplex(z):
+                # secondo ordine
+                if omega < wn/10:
+                    pass
+                elif omega > 10*wn:
+                    phi += 180
+                else:
+                    phi += 90 * np.log10(omega/(wn/10))
             else:
-                phi -= 45 * np.log10(omega / (p/10))
+                # reale
+                if omega < wn/10:
+                    pass
+                elif omega > 10*wn:
+                    phi += 90
+                else:
+                    phi += 45 * np.log10(omega/(wn/10))
+
+        # POLI
+        for p in poles:
+            if np.isclose(p, 0):
+                continue
+
+            wn = abs(p)
+
+            if np.iscomplex(p):
+                # secondo ordine
+                if omega < wn/10:
+                    pass
+                elif omega > 10*wn:
+                    phi -= 180
+                else:
+                    phi -= 90 * np.log10(omega/(wn/10))
+            else:
+                # reale
+                if np.real(p) > 0:
+                    # ⚠️ RHP (fase invertita)
+                    if omega < wn/10:
+                        pass
+                    elif omega > 10*wn:
+                        phi += 90
+                    else:
+                        phi += 45 * np.log10(omega/(wn/10))
+                else:
+                    if omega < wn/10:
+                        pass
+                    elif omega > 10*wn:
+                        phi -= 90
+                    else:
+                        phi -= 45 * np.log10(omega/(wn/10))
 
         phase[i] = phi
 
-    # -------- PLOT --------
+    # ---------------- PLOT ----------------
     plt.figure()
 
     plt.subplot(2,1,1)
-    plt.semilogx(w, mag_vals)
-    plt.title("Bode Asintotico (CORRETTO)")
+    plt.semilogx(w, mag)
+    plt.title("Bode Asintotico (completo)")
     plt.ylabel("Modulo (dB)")
     plt.grid(True, which="both")
 
@@ -169,48 +159,33 @@ def bode_asintotico(system):
     plt.semilogx(w, phase)
     plt.ylabel("Fase (°)")
     plt.xlabel("Frequenza (rad/s)")
+    plt.yticks(np.arange(-360, 361, 45))
     plt.grid(True, which="both")
-    plt.yticks(np.arange(min(phase)-45, max(phase)+45, 45))
 
 
 # -------------------------------
 # MAIN
 # -------------------------------
 def main():
-    print("Scegli modalità:")
-    print("1 → Funzione G(s)")
-    print("2 → Forma di Bode")
+    expr = input("Inserisci G(s): ")
 
-    choice = input("> ")
-
-    if choice == "1":
-        expr_str = input("Inserisci G(s): ")
-        num, den, expr = parse_transfer_function(expr_str)
-
-        bode_form(expr)
-
-    elif choice == "2":
-        expr = input_bode_form()
-        num, den, _ = parse_transfer_function(str(expr))
-
-    else:
-        print("Scelta non valida")
-        return
+    num, den = parse_transfer_function(expr)
 
     system = ctrl.TransferFunction(num, den)
 
     print("\nSistema:")
     print(system)
 
-    # Bode
+    # Bode reale
     plt.figure()
     ctrl.bode(system, dB=True, deg=True)
-
-    bode_asintotico(system)
 
     # Nyquist
     plt.figure()
     ctrl.nyquist(system)
+
+    # Bode approssimato corretto
+    bode_asintotico(system)
 
     plt.show()
 
