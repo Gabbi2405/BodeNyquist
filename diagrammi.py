@@ -1,52 +1,212 @@
 import sympy as sp
 import control as ctrl
 import matplotlib.pyplot as plt
-DEBUG=True#if DEBUG:print(f"[DEBUG] ")
+import numpy as np
+
+s = sp.symbols('s')
 
 
+# -------------------------------
+# Parsing funzione classica
+# -------------------------------
 def parse_transfer_function(expr_str):
-    s = sp.symbols('s')
-    if DEBUG:print(f"[DEBUG] s: {s}")
-    # Converte stringa in espressione simbolica
     expr = sp.sympify(expr_str)
-    if DEBUG:print(f"[DEBUG] expr: {expr}")
-    # Separa numeratore e denominatore
     num, den = sp.fraction(expr)
-    if DEBUG:print(f"[DEBUG] num: {num}, den: {den}")
 
-
-    # Espande i polinomi
     num_poly = sp.expand(num)
     den_poly = sp.expand(den)
 
-    # Ottiene coefficienti
     num_coeffs = sp.Poly(num_poly, s).all_coeffs()
     den_coeffs = sp.Poly(den_poly, s).all_coeffs()
 
-    # Converte in float
     num_coeffs = [float(c) for c in num_coeffs]
     den_coeffs = [float(c) for c in den_coeffs]
 
-    return num_coeffs, den_coeffs
-#5*(1+s)*(10+s)/((0.1+s)^2*(50+s))
+    return num_coeffs, den_coeffs, expr
 
+
+# -------------------------------
+# Generazione forma di Bode
+# -------------------------------
+def bode_form(expr):
+    num, den = sp.fraction(expr)
+
+    num_factors = sp.factor(num)
+    den_factors = sp.factor(den)
+
+    print("\nForma fattorizzata:")
+    print("Numeratore:", num_factors)
+    print("Denominatore:", den_factors)
+
+    # Estrazione zeri e poli
+    zeros = sp.solve(num, s)
+    poles = sp.solve(den, s)
+
+    print("\nZeri:", zeros)
+    print("Poli:", poles)
+
+
+# -------------------------------
+# Input manuale forma di Bode
+# -------------------------------
+def input_bode_form():
+    print("\nInserisci guadagno K:")
+    K = float(input("> "))
+
+    expr = K
+
+    print("Quanti zeri? ")
+    z = int(input("> "))
+    for _ in range(z):
+        print("Zero del tipo (1 + s/w) → inserisci w:")
+        w = float(input("> "))
+        expr *= (1 + s/w)
+
+    print("Quanti poli? ")
+    p = int(input("> "))
+    for _ in range(p):
+        print("Polo del tipo (1 + s/w) → inserisci w:")
+        w = float(input("> "))
+        expr /= (1 + s/w)
+
+    print("Quanti integratori (1/s)? ")
+    n = int(input("> "))
+    expr /= s**n
+
+    return expr
+
+# -------------------------------
+# Bode aprossimativo
+# -------------------------------
+
+def bode_asintotico(system):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    poles = ctrl.poles(system)
+    zeros = ctrl.zeros(system)
+
+    # Separazione poli/zeri
+    wp = sorted([abs(p) for p in poles if p != 0])
+    wz = sorted([abs(z) for z in zeros if z != 0])
+
+    # Integratori
+    n_integrators = sum(1 for p in poles if p == 0)
+
+    # Frequenze log
+    w = np.logspace(-2, 3, 1000)
+
+    # Guadagno iniziale
+    K = abs(system.dcgain()) if system.dcgain() not in [None, np.inf] else 1
+    mag = np.zeros_like(w)
+
+    # Lista eventi (frequenze di spezzata)
+    events = []
+    for z in wz:
+        events.append((z, +20))
+    for p in wp:
+        events.append((p, -20))
+
+    events.sort()
+
+    # Pendenza iniziale
+    slope = -20 * n_integrators
+
+    current_mag = 20 * np.log10(K)
+
+    last_w = w[0]
+
+    mag_vals = []
+
+    for omega in w:
+        # aggiorna slope se superi breakpoint
+        for freq, delta in events:
+            if last_w < freq <= omega:
+                # aggiorna valore fino al breakpoint
+                current_mag += slope * np.log10(freq / last_w)
+                slope += delta
+                last_w = freq
+
+        # continua con slope corrente
+        mag_point = current_mag + slope * np.log10(omega / last_w)
+        mag_vals.append(mag_point)
+
+    # -------- FASE (approssimata stile umano) --------
+    phase = np.zeros_like(w)
+    
+
+    for i, omega in enumerate(w):
+        phi = -90 * n_integrators
+
+        for z in wz:
+            if omega < z/10:
+                pass
+            elif omega > 10*z:
+                phi += 90
+            else:
+                phi += 45 * np.log10(omega / (z/10))
+
+        for p in wp:
+            if omega < p/10:
+                pass
+            elif omega > 10*p:
+                phi -= 90
+            else:
+                phi -= 45 * np.log10(omega / (p/10))
+
+        phase[i] = phi
+
+    # -------- PLOT --------
+    plt.figure()
+
+    plt.subplot(2,1,1)
+    plt.semilogx(w, mag_vals)
+    plt.title("Bode Asintotico (CORRETTO)")
+    plt.ylabel("Modulo (dB)")
+    plt.grid(True, which="both")
+
+    plt.subplot(2,1,2)
+    plt.semilogx(w, phase)
+    plt.ylabel("Fase (°)")
+    plt.xlabel("Frequenza (rad/s)")
+    plt.grid(True, which="both")
+    plt.yticks(np.arange(min(phase)-45, max(phase)+45, 45))
+
+
+# -------------------------------
+# MAIN
+# -------------------------------
 def main():
-    print("Inserisci la funzione di trasferimento in s (es: (s-10)*(s+100)/(s**2*(s-1)**2*(s+10)**2):")
-    expr = input("> ")
+    print("Scegli modalità:")
+    print("1 → Funzione G(s)")
+    print("2 → Forma di Bode")
 
-    num, den = parse_transfer_function(expr)
+    choice = input("> ")
 
-    print("\nNumeratore:", num)
-    print("Denominatore:", den)
+    if choice == "1":
+        expr_str = input("Inserisci G(s): ")
+        num, den, expr = parse_transfer_function(expr_str)
+
+        bode_form(expr)
+
+    elif choice == "2":
+        expr = input_bode_form()
+        num, den, _ = parse_transfer_function(str(expr))
+
+    else:
+        print("Scelta non valida")
+        return
 
     system = ctrl.TransferFunction(num, den)
 
-    print("\nFunzione di trasferimento:")
+    print("\nSistema:")
     print(system)
 
     # Bode
     plt.figure()
     ctrl.bode(system, dB=True, deg=True)
+
+    bode_asintotico(system)
 
     # Nyquist
     plt.figure()
