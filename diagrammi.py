@@ -3,8 +3,9 @@ import control as ctrl
 import matplotlib.pyplot as plt
 import numpy as np
 
-s = sp.symbols('s')
+DEBUG=False#if(DEBUG):print(f"[Debug] ")
 
+s = sp.symbols('s')
 
 # -------------------------------
 # Parsing funzione classica
@@ -86,6 +87,8 @@ def bode_asintotico(system):
     poles = ctrl.poles(system)
     zeros = ctrl.zeros(system)
 
+    if(DEBUG):print(f"[Debug] poles: {poles}, zeros: {zeros}")
+
     # Separazione poli/zeri
     wp = sorted([abs(p) for p in poles if p != 0])
     wz = sorted([abs(z) for z in zeros if z != 0])
@@ -97,8 +100,13 @@ def bode_asintotico(system):
     w = np.logspace(-2, 3, 1000)
 
     # Guadagno iniziale
-    K = abs(system.dcgain()) if system.dcgain() not in [None, np.inf] else 1
+    #K = abs(system.dcgain()) if system.dcgain() not in [None, np.inf] else 1
+    K = 20* np.log()
     mag = np.zeros_like(w)
+
+    if(DEBUG):print(f"[Debug] dcgain: {system.dcgain()}")
+    if(DEBUG):print(f"[Debug] system: {system}")
+    if(DEBUG):print(f"[Debug] guadagno: {K}") 
 
     # Lista eventi (frequenze di spezzata)
     events = []
@@ -196,7 +204,8 @@ def main():
     else:
         print("Scelta non valida")
         return
-
+    
+    if(DEBUG):print(f"[Debug] num {num}, den {den}")
     system = ctrl.TransferFunction(num, den)
 
     print("\nSistema:")
