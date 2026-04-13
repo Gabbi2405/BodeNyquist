@@ -100,8 +100,14 @@ def bode_asintotico(system):
     w = np.logspace(-2, 3, 1000)
 
     # Guadagno iniziale
-    #K = abs(system.dcgain()) if system.dcgain() not in [None, np.inf] else 1
-    K = 20* np.log()
+    num_coeffs = np.asarray(system.num[0][0], dtype=float)
+    den_coeffs = np.asarray(system.den[0][0], dtype=float)
+    num_leading = abs(num_coeffs[0]) if num_coeffs.size else 1
+    den_leading = abs(den_coeffs[0]) if den_coeffs.size else 1
+    zero_factor = np.prod(wz) if wz else 1
+    pole_factor = np.prod(wp) if wp else 1
+    K = (num_leading / den_leading) * (zero_factor / pole_factor)
+    #K = 20* np.log()
     mag = np.zeros_like(w)
 
     if(DEBUG):print(f"[Debug] dcgain: {system.dcgain()}")
